@@ -8,11 +8,11 @@ import type { JournalRepository } from './journalRepository.js';
 export class MemoryRepository implements JournalRepository {
   private records: JournalRecord[] = [];
 
-  save(record: JournalRecord): void {
+  async save(record: JournalRecord): Promise<void> {
     this.records.push(record);
   }
 
-  findAll(): JournalRecord[] {
+  async findAll(): Promise<JournalRecord[]> {
     return [...this.records];
   }
 }

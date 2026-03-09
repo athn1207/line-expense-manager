@@ -1,0 +1,17 @@
+# 環境変数（APIキー等・GitHubに上げない）
+.env
+.env.local
+
+# 依存パッケージ
+node_modules/
+
+# ビルド出力
+dist/
+
+# ログ
+logs/
+*.log
+
+# Google サービスアカウント鍵（秘密情報）
+sheets-writer*.json
+*-credentials.json

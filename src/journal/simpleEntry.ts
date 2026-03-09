@@ -20,6 +20,8 @@ export const EXPENSE_TYPE_TO_DEBIT_ACCOUNT = {
   水道光熱費: '水道光熱費',
   旅費交通費: '旅費交通費',
   その他: 'その他',
+  会議費: '会議費',
+  雑費: '雑費',
 } as const;
 
 /** paymentMethod → 貸方科目 */

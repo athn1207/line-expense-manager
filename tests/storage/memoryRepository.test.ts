@@ -7,19 +7,21 @@ import assert from 'node:assert';
 import { MemoryRepository } from '../../src/storage/memoryRepository.js';
 import type { JournalRecord } from '../../src/dto/journalRecord.js';
 
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    console.log(`  ✓ ${name}`);
-  } catch (e) {
-    console.error(`  ✗ ${name}`);
-    throw e;
-  }
+function test(name: string, fn: () => void | Promise<void>) {
+  return (async () => {
+    try {
+      await fn();
+      console.log(`  ✓ ${name}`);
+    } catch (e) {
+      console.error(`  ✗ ${name}`);
+      throw e;
+    }
+  })();
 }
 
 console.log('MemoryRepository');
 
-test('save すると findAll に1件入る', () => {
+await test('save すると findAll に1件入る', async () => {
   const repo = new MemoryRepository();
   const record: JournalRecord = {
     date: '2025-03-04',
@@ -28,36 +30,36 @@ test('save すると findAll に1件入る', () => {
     debitAmount: 1500,
     creditAmount: 1500,
   };
-  repo.save(record);
-  const all = repo.findAll();
+  await repo.save(record);
+  const all = await repo.findAll();
   assert.strictEqual(all.length, 1);
   assert.strictEqual(all[0].debitAccount, '旅費交通費');
   assert.strictEqual(all[0].creditAccount, '現金');
 });
 
-test('複数保存できる', () => {
+await test('複数保存できる', async () => {
   const repo = new MemoryRepository();
-  repo.save({
+  await repo.save({
     date: '2025-03-01',
     debitAccount: '通信費',
     creditAccount: '未払金',
     debitAmount: 5500,
     creditAmount: 5500,
   });
-  repo.save({
+  await repo.save({
     date: '2025-03-04',
     debitAccount: '消耗品費',
     creditAccount: '現金',
     debitAmount: 3200,
     creditAmount: 3200,
   });
-  const all = repo.findAll();
+  const all = await repo.findAll();
   assert.strictEqual(all.length, 2);
   assert.strictEqual(all[0].date, '2025-03-01');
   assert.strictEqual(all[1].date, '2025-03-04');
 });
 
-test('date も保存される', () => {
+await test('date も保存される', async () => {
   const repo = new MemoryRepository();
   const record: JournalRecord = {
     date: '2025-12-31',
@@ -66,12 +68,12 @@ test('date も保存される', () => {
     debitAmount: 100,
     creditAmount: 100,
   };
-  repo.save(record);
-  const all = repo.findAll();
+  await repo.save(record);
+  const all = await repo.findAll();
   assert.strictEqual(all[0].date, '2025-12-31');
 });
 
-test('debit/credit 金額一致確認', () => {
+await test('debit/credit 金額一致確認', async () => {
   const repo = new MemoryRepository();
   const record: JournalRecord = {
     date: '2025-03-04',
@@ -80,8 +82,8 @@ test('debit/credit 金額一致確認', () => {
     debitAmount: 8000,
     creditAmount: 8000,
   };
-  repo.save(record);
-  const all = repo.findAll();
+  await repo.save(record);
+  const all = await repo.findAll();
   assert.strictEqual(all[0].debitAmount, all[0].creditAmount);
   assert.strictEqual(all[0].debitAmount, 8000);
 });
