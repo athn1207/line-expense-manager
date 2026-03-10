@@ -10,19 +10,17 @@ import { Client, middleware } from '@line/bot-sdk';
 import type { Readable } from 'node:stream';
 import { ReceiptPipelineService } from './application/receiptPipelineService.js';
 import { JournalService } from './application/journalService.js';
-import { GoogleSheetsRepository } from './storage/googleSheetsRepository.js';
 import { GoogleVisionOcrService } from './infrastructure/ocr/googleVisionOcrService.js';
 // added feature: 高精度領収書（画像前処理・OCR正規化・重複防止・新スプレッドシート列）
 import { preprocessForOcr } from './infrastructure/imagePreprocess.js';
 import { buildReceiptRecord } from './application/highPrecisionReceiptService.js';
-import { ReceiptSheetsRepository } from './storage/receiptSheetsRepository.js';
 import { saveOcrLog } from './infrastructure/ocrLogWriter.js';
+import { GoogleSheetsRepository } from './storage/googleSheetsRepository.js';
+import { UserSheetsRepository } from './storage/userSheetsRepository.js';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT ?? 3000);
 const spreadsheetId = process.env.SPREADSHEET_ID ?? '14zc49qa_n_I_ZkNAyIbTAebDOX_pkh7hr1rRr9Uprmc';
 const sheetName = 'Journal';
-/** 領収書記録用シート名。スプレッドシートのタブ名と完全一致させる（未設定時は Receipts） */
-const receiptSheetName = process.env.RECEIPT_SHEET_NAME ?? 'Receipts';
 
 const channelSecret = process.env.LINE_CHANNEL_SECRET;
 const channelAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -39,7 +37,9 @@ const repo = new GoogleSheetsRepository(spreadsheetId, sheetName);
 const journalService = new JournalService(repo);
 const pipelineService = new ReceiptPipelineService(journalService);
 const ocrService = new GoogleVisionOcrService();
-const receiptSheetsRepo = new ReceiptSheetsRepository(spreadsheetId, receiptSheetName);
+const userDbSheetName = process.env.USER_DB_SHEET_NAME ?? 'user_db';
+// ユーザー専用タブと user_db は、メインの SPREADSHEET_ID 内で管理する
+const userSheetsRepo = new UserSheetsRepository(spreadsheetId, userDbSheetName);
 
 /** LINE の getMessageContent が返すストリームを Buffer に変換 */
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -54,6 +54,9 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
 type WebhookEvent = {
   type: string;
   replyToken: string;
+  source?: {
+    userId?: string;
+  };
   message?: {
     type: string;
     text?: string;
@@ -62,6 +65,11 @@ type WebhookEvent = {
 };
 
 const app = express();
+
+// Render 健康チェック用
+app.get('/', (_req, res) => {
+  res.send('BOT RUNNING');
+});
 
 // LINE Webhook では middleware が body をパースするため、ここでは express.json() を使わない
 app.post(
@@ -100,6 +108,8 @@ app.post(
         if (!messageId) continue;
         void (async () => {
           try {
+            const userId = event.source?.userId;
+
             const stream = await client.getMessageContent(messageId);
             const imageBuffer = await streamToBuffer(stream as Readable);
             const preprocessed = await preprocessForOcr(imageBuffer);
@@ -120,14 +130,27 @@ app.post(
 
             record = { ...record, date: receiptDate, vendor: storeName, amount };
 
-            const sheetData = await receiptSheetsRepo.getExistingRows();
-            if (receiptSheetsRepo.isDuplicate(sheetData, receiptDate, storeName, amount)) {
+            // ユーザー専用タブを取得（なければ作成）＋ user_db 登録
+            if (!userId) {
+              throw new Error('userId が取得できませんでした');
+            }
+            const { sheetName, isNew } = await userSheetsRepo.getOrCreateUserSheet(userId);
+
+            // 重複チェック（同一ユーザーの同一タブ内で、日付+店名+金額 が同じか）
+            const sheetData = await userSheetsRepo.getUserSheetRows(sheetName);
+            if (userSheetsRepo.isDuplicate(sheetData, receiptDate, storeName, amount)) {
               console.log('Duplicate receipt detected');
-              await client.replyMessage(event.replyToken, { type: 'text', text: 'この領収書は既に登録されています' });
+              await client.replyMessage(event.replyToken, { type: 'text', text: 'このレシートはすでに登録されています' });
               return;
             }
 
-            await receiptSheetsRepo.append(record);
+            await userSheetsRepo.appendReceiptRow(sheetName, {
+              date: receiptDate,
+              storeName,
+              account: String(record.account ?? ''),
+              payment: String(record.payment ?? ''),
+              amount,
+            });
 
             saveOcrLog({
               timestamp: new Date().toISOString(),
@@ -139,10 +162,26 @@ app.post(
 
             const dateDisplay = receiptDate.replace(/-/g, '/');
             const replyText = [
-              '登録しました',
-              `${dateDisplay} | ${storeName} | ${record.account} | ${record.payment} | ${amount}円`,
+              '経費を記録しました',
+              '',
+              `日付: ${dateDisplay}`,
+              `店名: ${storeName}`,
+              `金額: ${amount}円`,
             ].join('\n');
+
+            // レシート登録結果
             await client.replyMessage(event.replyToken, { type: 'text', text: replyText });
+
+            // 初回ユーザーの場合のみ、専用タブ作成メッセージを追加送信
+            if (isNew && userId) {
+              const newUserText = [
+                'あなた専用の経費シートを作成しました',
+                '',
+                'Googleスプレッドシート内に',
+                'あなた専用タブを作成しています',
+              ].join('\n');
+              await client.pushMessage(userId, { type: 'text', text: newUserText });
+            }
           } catch (error) {
             console.error('receipt image error:', error);
             await client.replyMessage(event.replyToken, { type: 'text', text: '領収書を読み取れませんでした' });
