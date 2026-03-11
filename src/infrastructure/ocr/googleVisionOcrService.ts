@@ -1,16 +1,33 @@
 /**
  * Google Cloud Vision API を用いた OCR サービス
  * 画像バイナリ → テキスト抽出
- * 環境変数 GOOGLE_APPLICATION_CREDENTIALS でサービスアカウントJSONのパスを指定する
+ *
+ * 認証（どちらか一方でOK）:
+ * - GOOGLE_APPLICATION_CREDENTIALS: サービスアカウントJSONのパス（ローカル）
+ * - GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY: 環境変数（Render など JSON が置けない環境）
  */
 
 import { ImageAnnotatorClient } from '@google-cloud/vision';
+
+function createVisionClient(): ImageAnnotatorClient {
+  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+  if (clientEmail && privateKey) {
+    return new ImageAnnotatorClient({
+      credentials: {
+        client_email: clientEmail,
+        private_key: privateKey.replace(/\\n/g, '\n'),
+      },
+    });
+  }
+  return new ImageAnnotatorClient();
+}
 
 export class GoogleVisionOcrService {
   private client: ImageAnnotatorClient;
 
   constructor() {
-    this.client = new ImageAnnotatorClient();
+    this.client = createVisionClient();
   }
 
   /**
